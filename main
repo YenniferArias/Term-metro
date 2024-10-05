@@ -1,0 +1,113 @@
+#include "mbed.h"
+
+// Definición de pines para el TM1637 (pantalla de 7 segmentos)
+// D2 es el pin de reloj (CLK), D3 es el pin de datos (DIO)
+DigitalOut clk(D2);  
+DigitalOut dio(D3);  
+
+// Definición de pines para el LM35 (sensor de temperatura) y otros periféricos
+AnalogIn lm35_pin(A0);     // Entrada analógica para el sensor LM35
+DigitalIn buttonFahrenheit(D7);  // Botón para cambiar la pantalla a Fahrenheit
+DigitalOut buzzer(D5);      // Buzzer para la alarma que se activa a los 40°C
+
+// Umbral de temperatura para la alarma
+const float temp_threshold_celsius = 40.0;  
+const float temp_threshold_fahrenheit = (temp_threshold_celsius * 9.0 / 5.0) + 32.0;  // 40°C = 104°F
+
+// Función para leer la temperatura en grados Celsius desde el LM35
+float read_temperature_celsius() {
+    float voltage = lm35_pin.read() * 3.3;  // LM35 genera un voltaje proporcional a la temperatura (0-3.3V)
+    return voltage * 100.0;  // Cada 10mV del LM35 representa 1°C, por eso multiplicamos por 100
+}
+
+// Función para convertir grados Celsius a Fahrenheit
+float celsius_to_fahrenheit(float celsius) {
+    return (celsius * 9.0 / 5.0) + 32.0;
+}
+
+// Funciones para controlar el TM1637 (pantalla de 7 segmentos)
+void start() {
+    dio = 1;
+    clk = 1;
+    wait_us(2);
+    dio = 0;
+}
+
+void stop() {
+    clk = 0;
+    dio = 0;
+    wait_us(2);
+    clk = 1;
+    dio = 1;
+}
+
+void write_byte(uint8_t data) {
+    for (int i = 0; i < 8; i++) {
+        clk = 0;
+        dio = (data & 0x01) ? 1 : 0;
+        data >>= 1;
+        wait_us(3);
+        clk = 1;
+        wait_us(3);
+    }
+    clk = 0;
+    dio = 1;
+    wait_us(3);
+    clk = 1;
+    wait_us(3);
+}
+
+void display_number(int number) {
+    uint8_t segments[] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+
+    start();
+    write_byte(0x40);  // Modo de escritura
+    stop();
+
+    start();
+    write_byte(0xC0);  // Comenzar desde el primer dígito
+
+    if (number < 10) {
+        write_byte(0x00);  
+        write_byte(0x00);  
+        write_byte(segments[number % 10]);  
+    } else if (number < 100) {
+        write_byte(0x00);  
+        write_byte(segments[(number / 10) % 10]);  
+        write_byte(segments[number % 10]);  
+    } else {
+        write_byte(segments[(number / 100) % 10]);  
+        write_byte(segments[(number / 10) % 10]);   
+        write_byte(segments[number % 10]);          
+    }
+
+    stop();
+
+    start();
+    write_byte(0x88);  // Ajustar brillo
+    stop();
+}
+
+int main() {
+    while (true) {
+        float temperature_c = read_temperature_celsius();  
+        float display_temperature = temperature_c;
+
+        if (buttonFahrenheit == 0) {
+            display_temperature = celsius_to_fahrenheit(temperature_c);
+        }
+
+        if (display_temperature >= 0 && display_temperature < 999) {
+            display_number((int)display_temperature);
+        }
+
+        if (temperature_c >= temp_threshold_celsius) {
+            buzzer = 1;  
+        } else {
+            buzzer = 0;  
+        }
+
+        // Reducimos el tiempo de espera para una detección más rápida
+        ThisThread::sleep_for(500ms);  // Ahora espera solo 100ms
+    }
+}
